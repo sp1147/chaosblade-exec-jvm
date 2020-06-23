@@ -135,6 +135,16 @@ public class Injector {
                 entry.getKey().equalsIgnoreCase(ModelConstant.EFFECT_PERCENT_MATCHER_NAME)) {
                 continue;
             }
+
+            EnhancerModel.CustomMatcher customMatcher = enhancerModel.getMatcher(entry.getKey());
+            if (customMatcher != null) {
+                if (customMatcher.match(matcher.get(entry.getKey()), enhancerModel)) {
+                    continue;
+                } else {
+                    return false;
+                }
+            }
+
             String value = enhancerMatcherModel.get(entry.getKey());
             if (value == null) {
                 return false;

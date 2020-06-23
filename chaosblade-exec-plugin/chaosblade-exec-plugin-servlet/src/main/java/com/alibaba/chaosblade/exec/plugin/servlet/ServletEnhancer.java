@@ -16,7 +16,11 @@
 
 package com.alibaba.chaosblade.exec.plugin.servlet;
 
+import java.io.InputStream;
 import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
 
 import com.alibaba.chaosblade.exec.common.aop.BeforeEnhancer;
 import com.alibaba.chaosblade.exec.common.aop.EnhancerModel;
@@ -40,20 +44,56 @@ public class ServletEnhancer extends BeforeEnhancer {
                                         Method method, Object[] methodArguments)
         throws Exception {
         Object request = methodArguments[0];
-        String queryString = ReflectUtil.invokeMethod(request, "getQueryString", new Object[] {}, false);
-        String contextPath = ReflectUtil.invokeMethod(request, "getContextPath", new Object[] {}, false);
-        String requestURI = ReflectUtil.invokeMethod(request, "getRequestURI", new Object[] {}, false);
-        String requestMethod = ReflectUtil.invokeMethod(request, "getMethod", new Object[] {}, false);
-
-        String requestPath = StringUtils.isBlank(contextPath) ? requestURI : requestURI.replaceFirst(contextPath, "");
+        String requestURI = ReflectUtil.invokeMethod(request, ServletConstant.GET_REQUEST_URI, new Object[] {}, false);
+        String requestMethod = ReflectUtil.invokeMethod(request, ServletConstant.GET_METHOD, new Object[] {}, false);
 
         MatcherModel matcherModel = new MatcherModel();
-        matcherModel.add(ServletConstant.QUERY_STRING_KEY, queryString);
         matcherModel.add(ServletConstant.METHOD_KEY, requestMethod);
-        matcherModel.add(ServletConstant.REQUEST_PATH_KEY, requestPath);
+        matcherModel.add(ServletConstant.REQUEST_PATH_KEY, requestURI);
 
         LOOGER.debug("servlet matchers: {}", JSON.toJSONString(matcherModel));
 
-        return new EnhancerModel(classLoader, matcherModel);
+        EnhancerModel enhancerModel = new EnhancerModel(classLoader, matcherModel);
+        String contentType = ReflectUtil.invokeMethod(request, ServletConstant.GET_CONTENT_TYPE, new Object[] {}, false);
+        Map<String, Object> queryString = getQueryString(requestMethod, request, contentType);
+        LOOGER.debug("origin params: {}", JSON.toJSONString(queryString));
+
+        enhancerModel.addContextValue(ServletConstant.QUERY_STRING_KEY, queryString);
+        enhancerModel.addCustomMatcher(ServletConstant.QUERY_STRING_KEY, ServletParamsMatcher.getInstance());
+        return enhancerModel;
+    }
+
+    private Map<String, Object> getQueryString(String method, Object request, String contentType) throws Exception {
+        Map<String, Object> params = new HashMap<String, Object>();
+        if ("post".equalsIgnoreCase(method)) {
+            InputStream inputStream = ReflectUtil.invokeMethod(request, ServletConstant.GET_INPUT_STREAM, new Object[] {}, false);
+            if (ServletConstant.CONTENT_TYPE_JSON.equalsIgnoreCase(contentType)) {
+                Map<String, Object> parameters = JSON.parseObject(inputStream, Map.class);
+                return parameters;
+            } else {
+                Map<String, String[]> parameterMap = ReflectUtil.invokeMethod(request, ServletConstant.GET_PARAMETER_MAP, new Object[] {}, false);
+                Set<Map.Entry<String, String[]>> entries = parameterMap.entrySet();
+                for (Map.Entry<String, String[]> entry : entries) {
+                    String value = "";
+                    String[] values = entry.getValue();
+                    if (values.length > 0) {
+                        value = values[0];
+                    }
+                    params.put(entry.getKey(), value);
+                }
+            }
+        } else {
+            String queryString = ReflectUtil.invokeMethod(request, ServletConstant.GET_QUERY_STRING, new Object[] {}, false);
+            if(StringUtils.isNotBlank(queryString)) {
+                String[] paramsStr = queryString.split(ServletConstant.AND_SYMBOL);
+                for (String s : paramsStr) {
+                    int i = s.indexOf(ServletConstant.EQUALS_SYMBOL);
+                    if (i != -1) {
+                       params.put(s.substring(0, i), s.substring(i + 1));
+                    }
+                }
+            }
+        }
+        return params;
     }
 }
